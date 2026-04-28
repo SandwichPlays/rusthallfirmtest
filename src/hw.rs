@@ -13,7 +13,7 @@ pub fn init_clocks(crm: &pac::at32f405::crm::RegisterBlock, flash: &pac::at32f40
     crm.pllcfg().modify(|_, w| unsafe {
         w.pllrcs().set_bit() // Select HEXT as source
          .pll_ms().bits(1)   
-         .pll_ns().bits(54) // pllns -> pll_ns
+         .pll_ns().bits(54) 
          .pllfr().bits(2)
     });
 
@@ -21,15 +21,15 @@ pub fn init_clocks(crm: &pac::at32f405::crm::RegisterBlock, flash: &pac::at32f40
     crm.ctrl().modify(|_, w| w.pllen().set_bit());
     while crm.ctrl().read().pllstbl().bit_is_clear() {}
 
-    // 5. Switch System Clock to PLL
-    crm.cfg().modify(|_, w| unsafe { w.sclksel().bits(0b10) }); 
-    while crm.cfg().read().sclksts().bits() != 0b10 {}          
+    // 5. Switch System Clock to PLL (2 = PLL)
+    crm.cfg().modify(|_, w| unsafe { w.sclksel().bits(2) }); 
+    while crm.cfg().read().sclksts().bits() != 2 {}          
 
     // 6. Set Bus Prescalers
     crm.cfg().modify(|_, w| unsafe {
         w.ahbdiv().bits(0)    
-         .apb1div().bits(0b100) 
-         .apb2div().bits(0b100) 
+         .apb1div().bits(4) // Div 2
+         .apb2div().bits(4) // Div 2
     });
 }
 
@@ -45,33 +45,35 @@ pub fn init_adc_dma(dp: &pac::at32f405::Peripherals, dma_buffer: u32, buffer_len
 
     // --- ADC Setup ---
     dp.GPIOA.omode().modify(|_, w| unsafe { 
-        w.om0().bits(0b11) // omode0 -> om0
-         .om1().bits(0b11)
-         .om2().bits(0b11)
-         .om3().bits(0b11)
+        w.om0().bits(3) // Analog mode
+         .om1().bits(3)
+         .om2().bits(3)
+         .om3().bits(3)
     });
 
-    // Configure Sequence (Artery naming)
-    adc1.cspt1().modify(|_, w| unsafe { // spt1 -> cspt1
-        w.cspt10().bits(0) // ch0
+    // Configure Sequence (Artery: osq)
+    // oslen is in osq1, defines (n-1) conversions
+    adc1.osq1().modify(|_, w| unsafe { w.oslen().bits(3) }); 
+    
+    // First 4 channels are in osq3 (osq1..osq4 fields)
+    adc1.osq3().modify(|_, w| unsafe {
+        w.osq1().bits(0) // 1st conversion: CH0
+         .osq2().bits(1) // 2nd conversion: CH1
+         .osq3().bits(2) // 3rd conversion: CH2
+         .osq4().bits(3) // 4th conversion: CH3
     });
-    adc1.cspt2().modify(|_, w| unsafe { // spt2 -> cspt2
-        w.cspt2().bits(1 | (2 << 5) | (3 << 10)) 
-    });
-    // Guessing 'vlen' for sequence length if 'slen' is missing
-    adc1.vlen().modify(|_, w| unsafe { w.vlen().bits(3) }); 
 
-    // Enable Scan Mode and DMA
+    // Enable Scan Mode and DMA Repeat
     adc1.ctrl1().modify(|_, w| w.sqen().set_bit()); 
-    adc1.ctrl2().modify(|_, w| w.ocdmaen().set_bit().rpen().set_bit()); // rpet -> rpen
+    adc1.ctrl2().modify(|_, w| w.ocdmaen().set_bit().rpen().set_bit()); 
 
     // Enable ADC and Calibration
     adc1.ctrl2().modify(|_, w| w.adcen().set_bit());
     adc1.ctrl2().modify(|_, w| w.adcal().set_bit());
     while adc1.ctrl2().read().adcal().bit_is_set() {}
 
-    // --- DMA Setup (DMA1 C1 is linked to ADC1) ---
-    let channel = &dma1.c1; // Trying field instead of method
+    // --- DMA Setup (DMA1 Channel 1 is linked to ADC1) ---
+    let channel = dma1.channel1(); // Corrected: channel1() is on dma1
     channel.paddr().write(|w| unsafe { w.bits(0x4001244C) }); // ADC1_ODT address
     channel.maddr().write(|w| unsafe { w.bits(dma_buffer) });
     channel.dtcnt().write(|w| unsafe { w.bits(buffer_len as u32) });
@@ -81,8 +83,8 @@ pub fn init_adc_dma(dp: &pac::at32f405::Peripherals, dma_buffer: u32, buffer_len
          .circ().set_bit()      // Circular mode
          .pinc().clear_bit()    // Peripheral no increment
          .minc().set_bit()      // Memory increment
-         .psze().bits(0b01)     // 16-bit
-         .msze().bits(0b01)     // 16-bit
+         .psze().bits(1)        // 16-bit
+         .msze().bits(1)        // 16-bit
          .chen().set_bit()      // Enable Channel
     });
 
