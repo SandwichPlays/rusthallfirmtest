@@ -19,19 +19,15 @@ static mut ADC_BUFFER: [u16; NUM_KEYS] = [0; NUM_KEYS];
 fn main() -> ! {
     let dp = pac::at32f405::Peripherals::take().unwrap();
     
-    // 1. Initialize Clocks to 216MHz (HEXT 8MHz -> PLL -> SCLK)
+    // 1. Initialize Clocks to 216MHz
     hw::init_clocks(&dp.CRM, &dp.FLASH);
 
-    // 2. Initialize GPIO for Matrix/Multiplexers
-    // TODO: Configure pins for Row/Column selection
-    dp.CRM.apb2en.modify(|_, w| w.gpioaen().set_bit().gpioben().set_bit());
-    
-    // 3. Initialize ADC and DMA for high-speed circular scanning
+    // 2. Initialize ADC and DMA for high-speed circular scanning
     unsafe {
         hw::init_adc_dma(&dp, ADC_BUFFER.as_ptr() as u32, NUM_KEYS as u16);
     }
 
-    // 4. Initialize Key Logic State
+    // 3. Initialize Key Logic State
     let mut keys = [HallKey::new(); NUM_KEYS];
 
     // --- CALIBRATION PHASE ---
@@ -41,11 +37,10 @@ fn main() -> ! {
             let sample = unsafe { ADC_BUFFER[i] };
             keys[i].calibrate_baseline(sample);
         }
-        // Small delay between samples
         cortex_m::asm::delay(1000);
     }
 
-    // 5. Initialize USB HS (Target 8kHz)
+    // 4. Initialize USB HS (Target 8kHz)
     // TODO: Setup USB OTG HS peripheral
 
     loop {
