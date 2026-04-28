@@ -53,7 +53,7 @@ pub fn init_adc_dma(dp: &pac::at32f405::Peripherals, dma_buffer: u32, buffer_len
 
     // Configure Sequence (Artery: osq)
     // oslen is in osq1, defines (n-1) conversions
-    adc1.osq1().modify(|_, w| unsafe { w.oslen().bits(3) }); 
+    adc1.osq1().modify(|_, w| unsafe { w.oclen().bits(3) }); 
     
     // First 4 channels are in osq3 (osn1..osn4 fields)
     adc1.osq3().modify(|_, w| unsafe {
@@ -74,9 +74,9 @@ pub fn init_adc_dma(dp: &pac::at32f405::Peripherals, dma_buffer: u32, buffer_len
 
     // --- DMA Setup (DMA1 Channel 1 is linked to ADC1) ---
     let channel = dma1.channel1(); // Corrected: channel1() is on dma1
-    channel.paddr().write(|w| unsafe { w.paddr().bits(0x4001244C) }); // ADC1_ODT address
-    channel.maddr().write(|w| unsafe { w.maddr().bits(dma_buffer) });
-    channel.dtcnt().write(|w| unsafe { w.dtcnt().bits(buffer_len) });
+    channel.paddr().write(|w| unsafe { w.bits(0x4001244C) }); // ADC1_ODT address
+    channel.maddr().write(|w| unsafe { w.bits(dma_buffer) });
+    channel.dtcnt().write(|w| unsafe { w.bits(buffer_len as u32) });
 
     channel.ctrl().modify(|_, w| unsafe {
         w.dtd().clear_bit()     // Peripheral to Memory
