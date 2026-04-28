@@ -113,6 +113,7 @@ dependencies = [
  "cortex-m-rt",
  "embedded-hal 1.0.0",
  "panic-halt",
+ "synopsys-usb-otg",
  "usb-device 0.3.2",
  "usbd-hid",
  "vcell",
@@ -262,6 +263,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "synopsys-usb-otg"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e948d523b316939545d8b21a48c27aef150ce25321b9f95ff7978647a806a6fe"
+dependencies = [
+ "cortex-m",
+ "embedded-hal 0.2.7",
+ "usb-device 0.3.2",
+ "vcell",
 ]
 
 [[package]]

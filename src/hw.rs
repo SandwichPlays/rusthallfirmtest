@@ -38,7 +38,7 @@ pub fn init_clocks(crm: &pac::crm::RegisterBlock, flash: &pac::flash::RegisterBl
 }
 
 /// Initialize ADC1 and DMA1 for high-speed matrix scanning.
-pub fn init_adc_dma(dp: &pac::Peripherals, dma_buffer: u32, buffer_len: u16) {
+pub fn init_adc_dma(dp: &pac::at32f405::Peripherals, dma_buffer: u32, buffer_len: u16) {
     let crm = &dp.CRM;
     let adc1 = &dp.ADC1;
     let dma1 = &dp.DMA1;

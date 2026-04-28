@@ -17,7 +17,7 @@ static mut ADC_BUFFER: [u16; NUM_KEYS] = [0; NUM_KEYS];
 
 #[entry]
 fn main() -> ! {
-    let dp = pac::Peripherals::take().unwrap();
+    let dp = pac::at32f405::Peripherals::take().unwrap();
     
     // 1. Initialize Clocks to 216MHz (HEXT 8MHz -> PLL -> SCLK)
     hw::init_clocks(&dp.CRM, &dp.FLASH);
