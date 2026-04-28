@@ -76,7 +76,7 @@ pub fn init_adc_dma(dp: &pac::at32f405::Peripherals, dma_buffer: u32, buffer_len
     let channel = dma1.channel1(); // Corrected: channel1() is on dma1
     channel.paddr().write(|w| unsafe { w.bits(0x4001244C) }); // ADC1_ODT address
     channel.maddr().write(|w| unsafe { w.bits(dma_buffer) });
-    channel.dtcnt().write(|w| unsafe { w.bits(buffer_len as u32) });
+    channel.dtcnt().write(|w| unsafe { w.bits(buffer_len) });
 
     channel.ctrl().modify(|_, w| unsafe {
         w.dtd().clear_bit()     // Peripheral to Memory
