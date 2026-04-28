@@ -1,0 +1,21 @@
+[package]
+name = "he_firmware"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.3"
+panic-halt = "0.2.0"
+at32f4xx-pac = { version = "0.4.0", features = ["at32f405", "rt"] }
+usb-device = "0.3.2"
+usbd-hid = "0.6.2"
+synopsys-usb-otg = { version = "0.4.0", features = ["fs"] } # Start with FS for stability
+embedded-hal = "1.0.0"
+vcell = "0.1.3"
+
+[profile.release]
+codegen-units = 1
+debug = true
+lto = true
+opt-level = "s"
