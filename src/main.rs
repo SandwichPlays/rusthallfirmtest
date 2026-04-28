@@ -24,7 +24,7 @@ fn main() -> ! {
 
     // 2. Initialize ADC and DMA for high-speed circular scanning
     unsafe {
-        hw::init_adc_dma(&dp, ADC_BUFFER.as_ptr() as u32, NUM_KEYS as u16);
+        hw::init_adc_dma(&dp, core::ptr::addr_of_mut!(ADC_BUFFER) as u32, NUM_KEYS as u16);
     }
 
     // 3. Initialize Key Logic State
