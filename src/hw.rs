@@ -1,7 +1,7 @@
 use at32f4xx_pac as pac;
 
 /// Initialize system clocks to 216MHz using an 8MHz external crystal (HEXT).
-pub fn init_clocks(crm: &pac::CRM, flash: &pac::FLASH) {
+pub fn init_clocks(crm: &pac::crm::RegisterBlock, flash: &pac::flash::RegisterBlock) {
     // 1. Enable HEXT
     crm.ctrl.modify(|_, w| w.hexten().set_bit());
     while crm.ctrl.read().hextstbl().bit_is_clear() {}

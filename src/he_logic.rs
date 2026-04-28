@@ -5,6 +5,7 @@ pub enum KeyDirection {
     Stationary,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct HallKey {
     pub filtered_value: u16,
     pub baseline: u16,
