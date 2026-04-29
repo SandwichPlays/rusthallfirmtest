@@ -1,9 +1,16 @@
 #include "tusb.h"
 
-// HID Report Descriptor
+// NKRO Keyboard Report Descriptor
 uint8_t const desc_hid_report[] = {
-    TUD_HID_REPORT_DESC_KEYBOARD()
+    TUD_HID_REPORT_DESC_KEYBOARD( HID_REPORT_ID(1) )
 };
+
+// We need a custom report structure for NKRO
+typedef struct TU_ATTR_PACKED {
+    uint8_t modifier;
+    uint8_t reserved;
+    uint8_t key_mask[16]; // 128 bits for NKRO
+} hid_nkro_report_t;
 
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
     return desc_hid_report;
@@ -37,7 +44,7 @@ uint8_t const *tud_descriptor_device_cb(void) {
 
 uint8_t const desc_configuration[] = {
     TUD_CONFIG_DESCRIPTOR(1, 1, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-    TUD_HID_DESCRIPTOR(0, 0, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID, CFG_TUD_HID_EP_BUFSIZE, 1) // 1 = 8kHz in HS
+    TUD_HID_DESCRIPTOR(0, 0, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID, CFG_TUD_HID_EP_BUFSIZE, 1)
 };
 
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
@@ -48,7 +55,7 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
 char const* string_desc_arr[] = {
     (const char[]) { 0x09, 0x04 }, // 0: English
     "Antigravity",                 // 1: Manufacturer
-    "HE-8K Keyboard",              // 2: Product
+    "HE-8K NKRO Keyboard",         // 2: Product
     "0001",                        // 3: Serial
 };
 

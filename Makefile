@@ -4,7 +4,7 @@ TINYUSB_ROOT = tinyusb
 CFLAGS = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -O2 -g -Wall -Iinc -I$(TINYUSB_ROOT)/src
 LDFLAGS = -Tlinker_script.ld -nostartfiles -Wl,--gc-sections
 
-SRC = src/main.c src/hw.c src/he_logic.c src/startup.c src/usb_descriptors.c
+SRC = src/main.c src/hw.c src/he_logic.c src/startup.c src/usb_descriptors.c src/flash.c
 # Add TinyUSB sources
 SRC += $(TINYUSB_ROOT)/src/tusb.c \
        $(TINYUSB_ROOT)/src/common/tusb_fifo.c \
