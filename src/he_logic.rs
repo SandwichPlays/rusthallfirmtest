@@ -1,100 +1,125 @@
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum KeyDirection {
-    Up,
-    Down,
-    Stationary,
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum KeyState {
+    WaitingForDiscovery, // Not yet calibrated
+    Discovering,         // Currently being pressed for calibration
+    Ready,               // Calibration locked
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone)]
+pub struct KeyConfig {
+    pub actuation_mm: u16,
+    pub release_mm: u16,
+    pub rt_enabled: bool,
+    pub rt_press_mm: u16,
+    pub rt_release_mm: u16,
+    pub top_deadzone_mm: u16,
+    pub bottom_deadzone_mm: u16,
+}
+
+#[derive(Copy, Clone)]
 pub struct HallKey {
+    pub state: KeyState,
     pub filtered_value: u16,
     pub baseline: u16,
     pub max_travel: u16,
+    
+    pub pos_mm: u16,
     pub is_pressed: bool,
-    pub last_direction: KeyDirection,
-    pub peak_value: u16,   // Highest value (most pressed) since last direction change
-    pub valley_value: u16, // Lowest value (least pressed) since last direction change
+    
+    pub peak_mm: u16,
+    pub valley_mm: u16,
 }
 
 impl HallKey {
     pub const fn new() -> Self {
         Self {
+            state: KeyState::WaitingForDiscovery,
             filtered_value: 0,
-            baseline: 2048, // Initial guess
-            max_travel: 4095,
+            baseline: 0,
+            max_travel: 0,
+            pos_mm: 0,
             is_pressed: false,
-            last_direction: KeyDirection::Stationary,
-            peak_value: 0,
-            valley_value: 4095,
+            peak_mm: 0,
+            valley_mm: 400,
         }
     }
 
-    /// Calibrates the baseline (unpressed) value. 
-    /// Should be called while the key is guaranteed to be up.
-    pub fn calibrate_baseline(&mut self, sample: u16) {
+    pub fn set_baseline(&mut self, sample: u16) {
         self.baseline = sample;
-        self.valley_value = sample;
         self.filtered_value = sample;
+        self.max_travel = sample; // Start here
     }
 
-    /// Updates the key state with a new ADC sample.
-    /// sensitivities and points are in raw ADC units.
-    pub fn update(
-        &mut self,
-        new_raw: u16,
-        actuation_point: u16,
-        rt_press_sensitivity: u16,
-        rt_release_sensitivity: u16,
-    ) {
-        // 1. Exponential Moving Average (EMA) filtering
-        // Simple alpha = 1/4 (25%)
-        self.filtered_value = (((self.filtered_value as u32 * 3) + new_raw as u32) / 4) as u16;
-
-        let val = self.filtered_value;
-
-        // 2. Track direction and local extrema for Rapid Trigger
-        if val > self.peak_value {
-            self.peak_value = val;
-            if self.last_direction != KeyDirection::Down {
-                self.last_direction = KeyDirection::Down;
-                self.valley_value = val; // Reset valley
-            }
-        } else if val < self.valley_value {
-            self.valley_value = val;
-            if self.last_direction != KeyDirection::Up {
-                self.last_direction = KeyDirection::Up;
-                self.peak_value = val; // Reset peak
-            }
+    fn update_position(&mut self) {
+        let range = self.max_travel.saturating_sub(self.baseline);
+        if range < 100 { 
+            self.pos_mm = 0;
+            return;
         }
 
-        // 3. Actuation Logic
-        if !self.is_pressed {
-            // Standard Actuation
-            if val >= actuation_point {
-                self.is_pressed = true;
-                self.peak_value = val;
-                self.valley_value = val;
-            }
-            // Rapid Trigger Re-press
-            else if val > (self.valley_value + rt_press_sensitivity) {
-                self.is_pressed = true;
-                self.peak_value = val;
-            }
-        } else {
-            // Rapid Trigger Release
-            if val < (self.peak_value - rt_release_sensitivity) {
-                self.is_pressed = false;
-                self.valley_value = val;
-            }
-            // Optional: Hard release at top
-            if val < self.baseline + 20 { // Deadzone relative to baseline
-                self.is_pressed = false;
-            }
-        }
+        let raw_pos = self.filtered_value.saturating_sub(self.baseline);
+        let mm = ((raw_pos as u32 * 400) / range as u32) as u16;
+        self.pos_mm = if mm > 400 { 400 } else { mm };
+    }
 
-        // 4. Dynamic Range Tracking (Auto-max)
-        if val > self.max_travel {
-            self.max_travel = val;
+    pub fn update(&mut self, new_raw: u16, config: &KeyConfig) {
+        self.filtered_value = (((self.filtered_value as u32 * 7) + new_raw as u32) / 8) as u16;
+
+        match self.state {
+            KeyState::WaitingForDiscovery => {
+                // If value rises significantly above baseline, start discovery
+                if self.filtered_value > self.baseline + 150 {
+                    self.state = KeyState::Discovering;
+                }
+            }
+            KeyState::Discovering => {
+                // Track the absolute maximum during the press
+                if self.filtered_value > self.max_travel {
+                    self.max_travel = self.filtered_value;
+                }
+                // Return to baseline (plus small buffer) means calibration for this key is done
+                if self.filtered_value < self.baseline + 50 {
+                    if self.max_travel > self.baseline + 300 { // Ensure they actually pressed it
+                        self.state = KeyState::Ready;
+                    } else {
+                        self.state = KeyState::WaitingForDiscovery; // Didn't press deep enough
+                    }
+                }
+            }
+            KeyState::Ready => {
+                self.update_position();
+                let pos = self.pos_mm;
+
+                if !self.is_pressed {
+                    if pos >= config.actuation_mm {
+                        self.is_pressed = true;
+                        self.peak_mm = pos;
+                    } else if config.rt_enabled && pos > config.top_deadzone_mm && pos < config.bottom_deadzone_mm {
+                        if pos > (self.valley_mm + config.rt_press_mm) {
+                            self.is_pressed = true;
+                            self.peak_mm = pos;
+                        }
+                    }
+                    if pos < self.valley_mm { self.valley_mm = pos; }
+                } else {
+                    if !config.rt_enabled && pos <= config.release_mm {
+                        self.is_pressed = false;
+                        self.valley_mm = pos;
+                    } else if config.rt_enabled {
+                        if pos >= config.bottom_deadzone_mm {
+                             self.peak_mm = pos;
+                        } else if pos < (self.peak_mm.saturating_sub(config.rt_release_mm)) {
+                            self.is_pressed = false;
+                            self.valley_mm = pos;
+                        }
+                    }
+                    if pos <= config.top_deadzone_mm {
+                        self.is_pressed = false;
+                        self.valley_mm = pos;
+                    }
+                    if pos > self.peak_mm { self.peak_mm = pos; }
+                }
+            }
         }
     }
 }

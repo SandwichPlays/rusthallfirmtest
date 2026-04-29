@@ -91,3 +91,56 @@ pub fn init_adc_dma(dp: &pac::at32f405::Peripherals, dma_buffer: u32, buffer_len
     // Start ADC conversion
     adc1.ctrl2().modify(|_, w| w.ocswtrg().set_bit()); 
 }
+
+/// Initialize TMR1 and DMA1 for WS2812B RGB on PA8.
+pub fn init_rgb(dp: &pac::at32f405::Peripherals, dma_buffer: u32, buffer_len: u16) {
+    let crm = &dp.CRM;
+    let tmr1 = &dp.TMR1;
+    let dma1 = &dp.DMA1;
+
+    // 1. Enable Clocks
+    crm.apb2en().modify(|_, w| w.tmr1().set_bit().gpioa().set_bit());
+    
+    // 2. Configure PA8 as TMR1_CH1 (AF1)
+    dp.GPIOA.cfgr().modify(|_, w| unsafe { w.iomc8().bits(2) }); // AF mode
+    dp.GPIOA.muxh().modify(|_, w| unsafe { w.mux8().bits(1) });  // MUX8 = AF1
+
+    // 3. Configure TMR1 (216MHz)
+    // Target 800kHz (1.25us period) -> 216 / 0.8 = 270 cycles
+    tmr1.pr().write(|w| unsafe { w.bits(269) }); 
+    tmr1.div().write(|w| unsafe { w.bits(0) });
+
+    // PWM Mode 1 on CH1
+    tmr1.cm1_output().modify(|_, w| unsafe { w.c1ocm().bits(6).c1oen().set_bit() });
+    tmr1.ctrl1().modify(|_, w| w.prben().set_bit()); // Buffer PR
+    
+    // Enable DMA request on CC1
+    tmr1.iden().modify(|_, w| w.c1den().set_bit());
+
+    // 4. Configure DMA1 Channel 2 (TMR1_CH1)
+    let channel = dma1.channel2();
+    channel.paddr().write(|w| unsafe { w.bits(0x40010034) }); // TMR1_C1DT address
+    channel.maddr().write(|w| unsafe { w.bits(dma_buffer) });
+    channel.dtcnt().write(|w| unsafe { w.bits(buffer_len) });
+
+    channel.ctrl().modify(|_, w| unsafe {
+        w.dtd().set_bit()       // Memory to Peripheral
+         .lm().clear_bit()      // Normal mode (Send once)
+         .pincm().clear_bit()   // Peripheral no increment
+         .mincm().set_bit()      // Memory increment
+         .pwidth().bits(1)      // 16-bit
+         .mwidth().bits(1)      // 16-bit
+         .chen().clear_bit()
+    });
+
+    // 5. Enable Timer
+    tmr1.ctrl1().modify(|_, w| w.tmren().set_bit());
+    tmr1.brk().modify(|_, w| w.oen().set_bit()); // Main output enable for advanced timers
+}
+
+pub fn update_rgb(dma1: &pac::at32f405::dma1::RegisterBlock, buffer_len: u16) {
+    let channel = dma1.channel2();
+    channel.ctrl().modify(|_, w| w.chen().clear_bit());
+    channel.dtcnt().write(|w| unsafe { w.bits(buffer_len) });
+    channel.ctrl().modify(|_, w| w.chen().set_bit());
+}
