@@ -2,25 +2,25 @@ use at32f4xx_pac as pac;
 use synopsys_usb_otg::UsbPeripheral;
 
 pub struct OtghsPeripheral {
-    pub global: pac::USB_OTGHS_GLOBAL,
-    pub device: pac::USB_OTGHS_DEVICE,
-    pub pwrclk: pac::USB_OTGHS_PWRCLK,
+    pub global: pac::at32f405::USB_OTGHS_GLOBAL,
+    pub device: pac::at32f405::USB_OTGHS_DEVICE,
+    pub pwrclk: pac::at32f405::USB_OTGHS_PWRCLK,
 }
 
 unsafe impl UsbPeripheral for OtghsPeripheral {
-    const REGISTERS: *const () = pac::USB_OTGHS_GLOBAL::ptr() as *const ();
-    const FIFO_DEPTH_WORDS: u16 = 1024; // AT32F405 HS FIFO is 4KB (1024 words)
+    const REGISTERS: *const () = pac::at32f405::USB_OTGHS_GLOBAL::ptr() as *const ();
+    const FIFO_DEPTH_WORDS: usize = 1024; 
     const ENDPOINT_COUNT: usize = 6;
+    const HIGH_SPEED: bool = true;
 
     fn enable() {
-        let dp = unsafe { pac::Peripherals::steal() };
+        let dp = unsafe { pac::at32f405::Peripherals::steal() };
         let crm = &dp.CRM;
 
-        // 1. Enable OTGHS Clocks
-        crm.ahben2().modify(|_, w| w.otghs().set_bit());
+        // 1. Enable OTGHS and GPIOA Clocks (AHBEN1)
+        crm.ahben1().modify(|_, w| w.otghs().set_bit().gpioa().set_bit());
         
         // 2. Enable Internal HS PHY
-        // On AT32F405, this requires setting specific bits in the CRM_OTGHS register
         crm.otghs().modify(|_, w| w.usbhs_phy12_sel().set_bit());
 
         // 3. Reset the core
@@ -29,146 +29,103 @@ unsafe impl UsbPeripheral for OtghsPeripheral {
     }
 
     fn ahb_frequency_hz(&self) -> u32 {
-        216_000_000 // Core is running at 216MHz
+        216_000_000
     }
 }
 
-/// Initialize system clocks to 216MHz using an 8MHz external crystal (HEXT).
 pub fn init_clocks(crm: &pac::at32f405::crm::RegisterBlock, flash: &pac::at32f405::flash::RegisterBlock) {
-    // 1. Enable HEXT
+    flash.psr().modify(|_, w| unsafe { w.wtcyc().bits(6) });
     crm.ctrl().modify(|_, w| w.hexten().set_bit());
-    while crm.ctrl().read().hextstbl().bit_is_clear() {}
+    while crm.ctrl().read().hextst().bit_is_clear() {}
 
-    // 2. Set Flash Latency (Required for high frequency)
-    flash.psr().modify(|_, w| unsafe { w.wtcyc().bits(0b111) });
-
-    // 3. Configure PLL
     crm.pllcfg().modify(|_, w| unsafe {
-        w.pllrcs().set_bit() // Select HEXT as source
-         .pll_ms().bits(1)   
-         .pll_ns().bits(54) 
-         .pll_fp().bits(2) // pllfr -> pll_fp
+        w.pllrcs().set_bit()     // HEXT as source
+         .pllms().bits(1)        // 8MHz / 1 = 8MHz
+         .pllns().bits(54)       // 8MHz * 54 = 432MHz
+         .pllfr().bits(1)        // 432MHz / 2 = 216MHz
     });
 
-    // 4. Enable PLL and wait for stability
     crm.ctrl().modify(|_, w| w.pllen().set_bit());
-    while crm.ctrl().read().pllstbl().bit_is_clear() {}
+    while crm.ctrl().read().pllst().bit_is_clear() {}
 
-    // 5. Switch System Clock to PLL (2 = PLL)
-    crm.cfg().modify(|_, w| unsafe { w.sclksel().bits(2) }); 
-    while crm.cfg().read().sclksts().bits() != 2 {}          
-
-    // 6. Set Bus Prescalers
     crm.cfg().modify(|_, w| unsafe {
-        w.ahbdiv().bits(0)    
-         .apb1div().bits(4) // Div 2
-         .apb2div().bits(4) // Div 2
+        w.ahbdiv().bits(0)       // AHB = 216MHz
+         .apb1div().bits(4)      // APB1 = 54MHz
+         .apb2div().bits(2)      // APB2 = 108MHz
+         .sclk_sel().bits(2)     // SystemClock = PLL
     });
 }
 
-/// Initialize ADC1 and DMA1 for high-speed matrix scanning.
-pub fn init_adc_dma(dp: &pac::at32f405::Peripherals, dma_buffer: u32, buffer_len: u16) {
+pub fn init_adc_dma(dp: &pac::at32f405::Peripherals, buffer_ptr: u32, buffer_len: u16) {
     let crm = &dp.CRM;
     let adc1 = &dp.ADC1;
     let dma1 = &dp.DMA1;
 
-    // Enable Peripheral Clocks
-    crm.apb2en().modify(|_, w| w.adc1().set_bit()); 
-    crm.ahben1().modify(|_, w| w.dma1().set_bit()); 
+    crm.ahben1().modify(|_, w| w.dma1().set_bit().gpioa().set_bit());
+    crm.apb2en().modify(|_, w| w.adc1().set_bit());
 
-    // --- ADC Setup ---
-    dp.GPIOA.cfgr().modify(|_, w| unsafe { 
-        w.iomc0().bits(3) // Analog mode
-         .iomc1().bits(3)
-         .iomc2().bits(3)
-         .iomc3().bits(3)
-    });
+    adc1.ctrl1().modify(|_, w| w.sqen().set_bit());
+    adc1.ctrl2().modify(|_, w| w.ocdmaen().set_bit().ocdmacen().set_bit());
 
-    // Configure Sequence (Artery: osq)
-    // oslen is in osq1, defines (n-1) conversions
     adc1.osq1().modify(|_, w| unsafe { w.oclen().bits(3) }); 
-    
-    // First 4 channels are in osq3 (osn1..osn4 fields)
-    adc1.osq3().modify(|_, w| unsafe {
-        w.osn1().bits(0) // 1st conversion: CH0
-         .osn2().bits(1) // 2nd conversion: CH1
-         .osn3().bits(2) // 3rd conversion: CH2
-         .osn4().bits(3) // 4th conversion: CH3
+    adc1.osq3().modify(|_, w| unsafe { 
+        w.osn1().bits(0)
+         .osn2().bits(1)
+         .osn3().bits(2)
+         .osn4().bits(3)
     });
 
-    // Enable Scan Mode and DMA Repeat
-    adc1.ctrl1().modify(|_, w| w.sqen().set_bit()); 
-    adc1.ctrl2().modify(|_, w| w.ocdmaen().set_bit().rpen().set_bit()); 
-
-    // Enable ADC and Calibration
-    adc1.ctrl2().modify(|_, w| w.adcen().set_bit());
-    adc1.ctrl2().modify(|_, w| w.adcal().set_bit());
-    while adc1.ctrl2().read().adcal().bit_is_set() {}
-
-    // --- DMA Setup (DMA1 Channel 1 is linked to ADC1) ---
-    let channel = dma1.channel1(); // Corrected: channel1() is on dma1
-    channel.paddr().write(|w| unsafe { w.bits(0x4001244C) }); // ADC1_ODT address
-    channel.maddr().write(|w| unsafe { w.bits(dma_buffer) });
+    let channel = dma1.channel1();
+    channel.paddr().write(|w| unsafe { w.bits(0x4001244C) });
+    channel.maddr().write(|w| unsafe { w.bits(buffer_ptr) });
     channel.dtcnt().write(|w| unsafe { w.bits(buffer_len) });
 
     channel.ctrl().modify(|_, w| unsafe {
-        w.dtd().clear_bit()     // Peripheral to Memory
-         .lm().set_bit()        // Circular mode (Loop Mode)
-         .pincm().clear_bit()   // Peripheral no increment
-         .mincm().set_bit()      // Memory increment
-         .pwidth().bits(1)      // 16-bit
-         .mwidth().bits(1)      // 16-bit
-         .chen().set_bit()      // Enable Channel
+        w.dtd().clear_bit()      // Peripheral to Memory
+         .lm().set_bit()         // Circular
+         .mincm().set_bit()
+         .pwidth().bits(1)       // 16-bit
+         .mwidth().bits(1)       // 16-bit
+         .chen().set_bit()
     });
 
-    // Start ADC conversion
     adc1.ctrl2().modify(|_, w| w.ocswtrg().set_bit()); 
 }
 
-/// Initialize TMR1 and DMA1 for WS2812B RGB on PA8.
 pub fn init_rgb(dp: &pac::at32f405::Peripherals, dma_buffer: u32, buffer_len: u16) {
     let crm = &dp.CRM;
     let tmr1 = &dp.TMR1;
     let dma1 = &dp.DMA1;
 
-    // 1. Enable Clocks
-    crm.apb2en().modify(|_, w| w.tmr1().set_bit().gpioa().set_bit());
+    crm.ahben1().modify(|_, w| w.gpioa().set_bit());
+    crm.apb2en().modify(|_, w| w.tmr1().set_bit());
     
-    // 2. Configure PA8 as TMR1_CH1 (AF1)
-    dp.GPIOA.cfgr().modify(|_, w| unsafe { w.iomc8().bits(2) }); // AF mode
-    dp.GPIOA.muxh().modify(|_, w| unsafe { w.mux8().bits(1) });  // MUX8 = AF1
+    dp.GPIOA.cfgr().modify(|_, w| unsafe { w.iomc8().bits(2) });
+    dp.GPIOA.muxh().modify(|_, w| unsafe { w.mux8().bits(1) });
 
-    // 3. Configure TMR1 (216MHz)
-    // Target 800kHz (1.25us period) -> 216 / 0.8 = 270 cycles
     tmr1.pr().write(|w| unsafe { w.bits(269) }); 
     tmr1.div().write(|w| unsafe { w.bits(0) });
 
-    // PWM Mode 1 on CH1
-    tmr1.cm1_output().modify(|_, w| unsafe { w.c1ocm().bits(6).c1oen().set_bit() });
-    tmr1.ctrl1().modify(|_, w| w.prben().set_bit()); // Buffer PR
-    
-    // Enable DMA request on CC1
+    tmr1.cm1_output().modify(|_, w| unsafe { w.c1c().bits(6).c1oen().set_bit() });
+    tmr1.ctrl1().modify(|_, w| w.prben().set_bit());
     tmr1.iden().modify(|_, w| w.c1den().set_bit());
 
-    // 4. Configure DMA1 Channel 2 (TMR1_CH1)
     let channel = dma1.channel2();
-    channel.paddr().write(|w| unsafe { w.bits(0x40010034) }); // TMR1_C1DT address
+    channel.paddr().write(|w| unsafe { w.bits(0x40010034) });
     channel.maddr().write(|w| unsafe { w.bits(dma_buffer) });
     channel.dtcnt().write(|w| unsafe { w.bits(buffer_len) });
 
     channel.ctrl().modify(|_, w| unsafe {
-        w.dtd().set_bit()       // Memory to Peripheral
-         .lm().clear_bit()      // Normal mode (Send once)
-         .pincm().clear_bit()   // Peripheral no increment
-         .mincm().set_bit()      // Memory increment
-         .pwidth().bits(1)      // 16-bit
-         .mwidth().bits(1)      // 16-bit
+        w.dtd().set_bit()
+         .lm().clear_bit()
+         .mincm().set_bit()
+         .pwidth().bits(1)
+         .mwidth().bits(1)
          .chen().clear_bit()
     });
 
-    // 5. Enable Timer
     tmr1.ctrl1().modify(|_, w| w.tmren().set_bit());
-    tmr1.brk().modify(|_, w| w.oen().set_bit()); // Main output enable for advanced timers
+    tmr1.brk().modify(|_, w| w.oen().set_bit());
 }
 
 pub fn update_rgb(dma1: &pac::at32f405::dma1::RegisterBlock, buffer_len: u16) {

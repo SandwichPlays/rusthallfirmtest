@@ -4,162 +4,143 @@
 use panic_halt as _;
 use cortex_m_rt::entry;
 use at32f4xx_pac as pac;
+use usb_device::prelude::*;
+use usbd_hid::descriptor::generator_prelude::*;
+use usbd_hid::hid_class::HIDClass;
 
-mod he_logic;
 mod hw;
+mod he_logic;
 
-use he_logic::HallKey;
+use he_logic::{HallKey, KeyConfig, KEY_MAP};
 
 const NUM_KEYS: usize = 64;
-
-// DMA buffer for ADC results. Must be static for safe DMA access.
 static mut ADC_BUFFER: [u16; NUM_KEYS] = [0; NUM_KEYS];
+static mut RGB_BUFFER: [u16; NUM_KEYS * 24 + 1] = [0; NUM_KEYS * 24 + 1];
 
-const RGB_COUNT: usize = NUM_KEYS;
-const RGB_BUF_LEN: usize = (RGB_COUNT * 24) + 80; // 24 bits + 100us reset period
-static mut RGB_BUFFER: [u16; RGB_BUF_LEN] = [0; RGB_BUF_LEN];
-
-/// Set an LED color in the DMA buffer (GRB order for SK6812-E)
-fn set_led(idx: usize, r: u8, g: u8, b: u8) {
-    if idx >= RGB_COUNT { return; }
-    let start = idx * 24;
-    unsafe {
-        for bit in 0..8 {
-            // SK6812-E specific timings (216MHz clock)
-            RGB_BUFFER[start + (7 - bit)] = if (g >> bit) & 1 == 1 { 130 } else { 65 };
-            RGB_BUFFER[start + 8 + (7 - bit)] = if (r >> bit) & 1 == 1 { 130 } else { 65 };
-            RGB_BUFFER[start + 16 + (7 - bit)] = if (b >> bit) & 1 == 1 { 130 } else { 65 };
-        }
+#[gen_hid_descriptor(
+    (collection = APPLICATION, usage_page = GENERIC_DESKTOP, usage = KEYBOARD) = {
+        (usage_page = KEYBOARD, usage_min = 0xE0, usage_max = 0xE7) = {
+            #[packed_bits 8] modifiers=input;
+        };
+        #[packed_bits 8] reserved=input;
+        (usage_page = KEYBOARD, usage_min = 0x00, usage_max = 0x65) = {
+            #[packed_bits 128] bitmap=input;
+        };
     }
+)]
+pub struct CustomKeyboardReport {
+    pub modifiers: u8,
+    pub reserved: u8,
+    pub bitmap: [u8; 16],
 }
 
 #[entry]
 fn main() -> ! {
     let dp = pac::at32f405::Peripherals::take().unwrap();
     
-    // 1. Initialize Clocks to 216MHz
     hw::init_clocks(&dp.CRM, &dp.FLASH);
+    hw::init_adc_dma(&dp, unsafe { core::ptr::addr_of_mut!(ADC_BUFFER) as u32 }, NUM_KEYS as u16);
+    hw::init_rgb(&dp, unsafe { core::ptr::addr_of_mut!(RGB_BUFFER) as u32 }, (NUM_KEYS * 24 + 1) as u16);
 
-    // 2. Initialize Hardware
-    hw::init_adc_dma(&dp, core::ptr::addr_of_mut!(ADC_BUFFER) as u32, NUM_KEYS as u16);
-    hw::init_rgb(&dp, unsafe { core::ptr::addr_of_mut!(RGB_BUFFER) as u32 }, RGB_BUF_LEN as u16);
-
-    // 3. Initialize Key Logic State
-    let mut keys = [HallKey::new(); NUM_KEYS];
-    let config = he_logic::KeyConfig {
-        actuation_mm: 12,        // 1.2mm
-        release_mm: 10,          // 1.0mm
-        rt_enabled: true,
-        rt_press_mm: 1,          // 0.1mm sensitivity
-        rt_release_mm: 1,        // 0.1mm sensitivity
-        top_deadzone_mm: 20,     // 0.2mm (Prevents RT near top)
-        bottom_deadzone_mm: 380,  // 3.8mm (Prevents RT near bottom)
-    };
-
-    // --- GUIDED CALIBRATION ---
-    // We calibrate keys one by one. You can use RGB LEDs to guide the user.
-    for i in 0..NUM_KEYS {
-        // 1. Set baseline for the current key while it's up
-        let sample = unsafe { *core::ptr::addr_of!(ADC_BUFFER[i]) };
-        keys[i].set_baseline(sample);
-
-        // 2. Wait for this specific key to be calibrated
-        while keys[i].state != he_logic::KeyState::Ready {
-            let sample = unsafe { *core::ptr::addr_of!(ADC_BUFFER[i]) };
-            keys[i].update(sample, &config);
-
-            // RGB UI Feedback
-            match keys[i].state {
-                he_logic::KeyState::WaitingForDiscovery => set_led(i, 0, 0, 100), // Dim Blue
-                he_logic::KeyState::Discovering => set_led(i, 100, 100, 0),       // Yellow
-                _ => set_led(i, 0, 100, 0),                                       // Green
-            }
-            hw::update_rgb(&dp.DMA1, RGB_BUF_LEN as u16);
-
-            cortex_m::asm::delay(1000); // 1ms-ish
-        }
-    }
-
-    // 4. Initialize USB HS (Target 8kHz)
     let usb_peripheral = hw::OtghsPeripheral {
         global: dp.USB_OTGHS_GLOBAL,
         device: dp.USB_OTGHS_DEVICE,
         pwrclk: dp.USB_OTGHS_PWRCLK,
     };
 
-    static mut USB_BUS: Option<usb_device::bus::UsbBusAllocator<synopsys_usb_otg::UsbBus<hw::OtghsPeripheral>>> = None;
-    unsafe {
-        USB_BUS = Some(synopsys_usb_otg::UsbBus::new(usb_peripheral, &mut [0u32; 1024]));
-    }
-    let usb_bus = unsafe { USB_BUS.as_ref().unwrap() };
+    let usb_bus = synopsys_usb_otg::UsbBus::new(usb_peripheral, unsafe { &mut *(0x20004000 as *mut [u32; 1024]) });
+    let usb_bus_alloc = UsbBusAllocator::new(usb_bus);
 
-    let mut hid = usbd_hid::hid_class::HIDClass::new(usb_bus, &[
-        0x05, 0x01,        // Usage Page (Generic Desktop)
-        0x09, 0x06,        // Usage (Keyboard)
-        0xA1, 0x01,        // Collection (Application)
-        0x05, 0x07,        //   Usage Page (Key Codes)
-        0x19, 0xE0,        //   Usage Minimum (224)
-        0x29, 0xE7,        //   Usage Maximum (231)
-        0x15, 0x00,        //   Logical Minimum (0)
-        0x25, 0x01,        //   Logical Maximum (1)
-        0x75, 0x01,        //   Report Size (1)
-        0x95, 0x08,        //   Report Count (8)
-        0x81, 0x02,        //   Input (Data, Variable, Absolute) ; Modifier byte
-        0x95, 0x01,        //   Report Count (1)
-        0x75, 0x08,        //   Report Size (8)
-        0x81, 0x01,        //   Input (Constant) ; Reserved byte
-        0x05, 0x07,        //   Usage Page (Key Codes)
-        0x19, 0x00,        //   Usage Minimum (0)
-        0x29, 0x7F,        //   Usage Maximum (127)
-        0x15, 0x00,        //   Logical Minimum (0)
-        0x25, 0x01,        //   Logical Maximum (1)
-        0x75, 0x01,        //   Report Size (1)
-        0x95, 0x80,        //   Report Count (128)
-        0x81, 0x02,        //   Input (Data, Variable, Absolute) ; 128-bit bitmap
-        0xC0               // End Collection
-    ], 1); // bInterval = 1 (125us for High Speed)
+    // usbd-hid 0.8.2 uses u8 for poll_ms. 1ms is the minimum for Interrupt endpoints in FS/HS descriptors.
+    let mut hid = HIDClass::new(&usb_bus_alloc, CustomKeyboardReport::desc(), 1);
 
-    let mut usb_dev = usb_device::device::UsbDeviceBuilder::new(usb_bus, usb_device::device::UsbVidPid(0x1209, 0x0001))
-        .manufacturer("Antigravity")
-        .product("HE Keyboard")
-        .serial_number("8KHZ")
-        .device_class(0x03) // HID
+    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus_alloc, UsbVidPid(0x1209, 0x0001))
+        .strings(&[usb_device::device::StringDescriptors::new(usb_device::lang_id::consts::ENGLISH_US)
+            .manufacturer("Antigravity")
+            .product("HE-8K Keyboard")
+            .serial_number("0001")])
+        .unwrap()
+        .device_class(0)
         .build();
 
+    let mut keys: [HallKey; NUM_KEYS] = [HallKey::new(); NUM_KEYS];
+    let config = KeyConfig {
+        actuation_mm: 1.5,
+        rt_down_mm: 0.1,
+        rt_up_mm: 0.1,
+        deadzone_top: 0.2,
+        deadzone_bottom: 0.2,
+    };
+
+    let mut current_cal_key: usize = 0;
+    let mut cal_complete = false;
+
     loop {
-        if !usb_dev.poll(&mut [&mut hid]) {
-            continue;
-        }
+        usb_dev.poll(&mut [&mut hid]);
 
-        // NKRO Report: 1 byte modifiers, 1 byte reserved, 16 bytes key bitmask (128 bits)
-        let mut report = [0u8; 18]; 
+        let adc_vals = unsafe { &ADC_BUFFER };
 
-        for i in 0..NUM_KEYS {
-            let raw_sample = unsafe { *core::ptr::addr_of!(ADC_BUFFER[i]) };
+        if !cal_complete {
+            let key = &mut keys[current_cal_key];
+            let raw = adc_vals[current_cal_key];
+
+            match key.discovery_tick(raw) {
+                he_logic::DiscoveryState::Done => {
+                    current_cal_key += 1;
+                    if current_cal_key >= NUM_KEYS {
+                        cal_complete = true;
+                    }
+                }
+                _ => {}
+            }
             
-            // Update Hall Effect logic
-            keys[i].update(raw_sample, &config);
+            unsafe {
+                for i in 0..NUM_KEYS {
+                    let color = if i < current_cal_key {
+                        (0, 255, 0) // Green: Calibrated
+                    } else if i == current_cal_key {
+                        match keys[i].discovery_state() {
+                            he_logic::DiscoveryState::WaitRelease => (255, 255, 0), // Yellow: Pressing
+                            _ => (0, 0, 255), // Blue: Waiting
+                        }
+                    } else {
+                        (0, 0, 0) // Off: Pending
+                    };
+                    set_led(i, color.0, color.1, color.2);
+                }
+            }
+            hw::update_rgb(&dp.DMA1, (NUM_KEYS * 24 + 1) as u16);
+        } else {
+            let mut report = CustomKeyboardReport {
+                modifiers: 0,
+                reserved: 0,
+                bitmap: [0; 16],
+            };
 
-            if keys[i].is_pressed {
-                let keycode = match i {
-                    0 => 0x14, // Q
-                    1 => 0x1A, // W
-                    2 => 0x08, // E
-                    3 => 0x15, // R
-                    _ => 0,
-                };
-                
-                if keycode != 0 {
-                    let byte_idx = 2 + (keycode / 8) as usize;
-                    let bit_idx = (keycode % 8) as u8;
-                    if byte_idx < 18 {
-                        report[byte_idx] |= 1 << bit_idx;
+            for i in 0..NUM_KEYS {
+                if keys[i].tick(adc_vals[i], &config) {
+                    let usb_code = KEY_MAP[i];
+                    if usb_code >= 0xE0 && usb_code <= 0xE7 {
+                        report.modifiers |= 1 << (usb_code - 0xE0);
+                    } else if usb_code < 128 {
+                        let byte = (usb_code >> 3) as usize;
+                        let bit = (usb_code & 0x07) as u8;
+                        if byte < 16 {
+                            report.bitmap[byte] |= 1 << bit;
+                        }
                     }
                 }
             }
+            let _ = hid.push_input(&report);
         }
+    }
+}
 
-        // Send report every 125us
-        let _ = hid.push_raw_input(&report);
+unsafe fn set_led(index: usize, r: u8, g: u8, b: u8) {
+    let base = index * 24;
+    for i in 0..8 {
+        RGB_BUFFER[base + i] = if (g & (1 << (7 - i))) != 0 { 18 } else { 9 };
+        RGB_BUFFER[base + 8 + i] = if (r & (1 << (7 - i))) != 0 { 18 } else { 9 };
+        RGB_BUFFER[base + 16 + i] = if (b & (1 << (7 - i))) != 0 { 18 } else { 9 };
     }
 }

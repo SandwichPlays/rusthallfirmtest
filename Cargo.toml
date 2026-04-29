@@ -9,7 +9,7 @@ cortex-m-rt = "0.7.3"
 panic-halt = "0.2.0"
 at32f4xx-pac = { version = "0.4.0", features = ["at32f405", "rt"] }
 usb-device = "0.3.2"
-usbd-hid = "0.6.2"
+usbd-hid = "0.8.2"
 synopsys-usb-otg = { version = "0.4.0", features = ["hs", "cortex-m"] } 
 embedded-hal = "1.0.0"
 vcell = "0.1.3"
