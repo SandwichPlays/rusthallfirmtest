@@ -16,13 +16,18 @@ void init_adc_dma(uint16_t *buffer, uint16_t len) {
     CRM->AHBEN1 |= (1 << 0) | (1 << 17); 
     CRM->APB2EN |= (1 << 9);
 
+    #if USE_MULTIPLEXERS
     // PA0-PA3: Mux Address, PA4-PA7: ADC Inputs
     GPIOA->CTRL = (GPIOA->CTRL & ~0xFFFFFF) | 0x22221111; // PA0-3: Out, PA4-7: Analog
+    #else
+    // Direct wire: just set pins to Analog
+    GPIOA->CTRL = (GPIOA->CTRL & ~0xFFFFFF) | 0x22222222; 
+    #endif
 
     ADC1->CTRL1 |= (1 << 8); 
     ADC1->CTRL2 |= (1 << 8); 
 
-    ADC1->OSQ1 = (3 << 20); // Scan 4 mux outputs at once
+    ADC1->OSQ1 = (3 << 20); // Scan 4 channels
     ADC1->OSQ3 = (4 << 0) | (5 << 5) | (6 << 10) | (7 << 15);
 
     DMA1->CH[0].PADDR = (uint32_t)&ADC1->ODATA;

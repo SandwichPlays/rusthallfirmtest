@@ -35,20 +35,22 @@ int main(void) {
     init_clocks();
     
     // Check for bootloader entry (e.g., hold Esc during startup)
-    // Esc is typically at Mux 0, Channel 0 in your KEY_MAP
-    GPIOA->ODR = (GPIOA->ODR & ~0x0F); // Select Mux step 0
-    for(volatile int i=0; i<1000; i++); // Wait for mux to settle
+    // If multiplexers are off, we just read the first pin directly
+    #if USE_MULTIPLEXERS
+    GPIOA->ODR = (GPIOA->ODR & ~0x0F); 
+    for(volatile int i=0; i<1000; i++); 
+    #endif
     
     init_adc_dma(adc_raw, 4);
-    if (adc_raw[0] > 2000) { // If Esc is pressed (assuming high value = pressed)
-        *((volatile uint32_t *)0x20000000) = 0x574f4c42; // "BLOW" magic for UF2
-        *((volatile uint32_t *)0xE000ED0C) = 0x05FA0004; // System Reset
+    if (adc_raw[0] > 2000) { 
+        *((volatile uint32_t *)0x20000000) = 0x574f4c42; 
+        *((volatile uint32_t *)0xE000ED0C) = 0x05FA0004; 
     }
 
     // Configure SysTick for 1ms interrupts
-    *((volatile uint32_t *)0xE000E014) = 216000 - 1; // Load value for 1ms @ 216MHz
-    *((volatile uint32_t *)0xE000E018) = 0;          // Current value
-    *((volatile uint32_t *)0xE000E010) = 0x07;       // Enable, Interrupt, Core clock
+    *((volatile uint32_t *)0xE000E014) = 216000 - 1; 
+    *((volatile uint32_t *)0xE000E018) = 0;          
+    *((volatile uint32_t *)0xE000E010) = 0x07;       
     
     init_adc_dma(adc_raw, 4);
     init_rgb(rgb_buffer, NUM_KEYS * 24 + 1);
@@ -57,7 +59,13 @@ int main(void) {
     for (int i = 0; i < NUM_KEYS; i++) hall_key_init(&keys[i]);
     load_calibration(keys);
 
-    key_config_t config = {150, 10, 10, 20, 20};
+    key_config_t config = {
+        DEFAULT_ACTUATION, 
+        DEFAULT_RT_DOWN, 
+        DEFAULT_RT_UP, 
+        DEFAULT_TOP_DZ, 
+        DEFAULT_BOTTOM_DZ
+    };
     int current_cal_key = 0;
     bool cal_complete = false;
 

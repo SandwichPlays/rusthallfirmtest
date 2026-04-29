@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define NUM_KEYS 64
+#include "config.h"
 
 typedef enum {
     DISCOVERY_WAITING,
