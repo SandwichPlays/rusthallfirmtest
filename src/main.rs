@@ -5,7 +5,8 @@ use panic_halt as _;
 use cortex_m_rt::entry;
 use at32f4xx_pac as pac;
 use usb_device::prelude::*;
-use usb_device::bus::UsbBusAllocator; // Missing import
+use usb_device::bus::UsbBusAllocator;
+use usb_device::LangID;
 use usbd_hid::descriptor::generator_prelude::*;
 use usbd_hid::hid_class::HIDClass;
 
@@ -55,7 +56,7 @@ fn main() -> ! {
     let mut hid = HIDClass::new(&usb_bus_alloc, CustomKeyboardReport::desc(), 1);
 
     let mut usb_dev = UsbDeviceBuilder::new(&usb_bus_alloc, UsbVidPid(0x1209, 0x0001))
-        .strings(&[usb_device::LangID::ENGLISH_US.into_descriptors()
+        .strings(&[LangID::EN_US.into_descriptors()
             .manufacturer("Antigravity")
             .product("HE-8K Keyboard")
             .serial_number("0001")])

@@ -45,7 +45,7 @@ pub fn init_clocks(crm: &pac::at32f405::crm::RegisterBlock, flash: &pac::at32f40
     crm.pllcfg().modify(|_, w| unsafe {
         w.pllrcs().set_bit()     // HEXT as source
          .pll_ms().bits(1)       // 8MHz / 1 = 8MHz (pll_ms in Artery PAC)
-         .pllns().bits(54)       // 8MHz * 54 = 432MHz
+         .pll_ns().bits(54)      // 8MHz * 54 = 432MHz (pll_ns in Artery PAC)
          .pllfr().bits(1)        // 432MHz / 2 = 216MHz
     });
 
