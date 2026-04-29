@@ -34,6 +34,17 @@ void set_led(int index, uint8_t r, uint8_t g, uint8_t b) {
 int main(void) {
     init_clocks();
     
+    // Check for bootloader entry (e.g., hold Esc during startup)
+    // Esc is typically at Mux 0, Channel 0 in your KEY_MAP
+    GPIOA->ODR = (GPIOA->ODR & ~0x0F); // Select Mux step 0
+    for(volatile int i=0; i<1000; i++); // Wait for mux to settle
+    
+    init_adc_dma(adc_raw, 4);
+    if (adc_raw[0] > 2000) { // If Esc is pressed (assuming high value = pressed)
+        *((volatile uint32_t *)0x20000000) = 0x574f4c42; // "BLOW" magic for UF2
+        *((volatile uint32_t *)0xE000ED0C) = 0x05FA0004; // System Reset
+    }
+
     // Configure SysTick for 1ms interrupts
     *((volatile uint32_t *)0xE000E014) = 216000 - 1; // Load value for 1ms @ 216MHz
     *((volatile uint32_t *)0xE000E018) = 0;          // Current value
@@ -59,14 +70,13 @@ int main(void) {
     while (1) {
         tud_task();
 
-        // Scan 4 keys per loop iteration
-        scan_mux_step(mux_step);
-        for (int i = 0; i < 4; i++) {
-            adc_history[mux_step * 4 + i] = adc_raw[i];
-        }
-        mux_step = (mux_step + 1) % 16;
-
         if (!cal_complete) {
+            // Free-run during calibration for faster response
+            static int cal_mux = 0;
+            scan_mux_step(cal_mux);
+            for (int i = 0; i < 4; i++) adc_history[cal_mux * 4 + i] = adc_raw[i];
+            cal_mux = (cal_mux + 1) % 16;
+
             discovery_state_t state = hall_key_discovery_tick(&keys[current_cal_key], adc_history[current_cal_key]);
             if (state == DISCOVERY_DONE) {
                 current_cal_key++;
@@ -85,6 +95,7 @@ int main(void) {
             }
             update_rgb(NUM_KEYS * 24 + 1);
         } else {
+            // In game mode, the scan is triggered by tud_sof_cb below
             if (tud_hid_ready()) {
                 hid_nkro_report_t report = {0};
                 for (int i = 0; i < NUM_KEYS; i++) {
@@ -101,6 +112,20 @@ int main(void) {
             }
         }
     }
+}
+
+// Triggered every 125us in High-Speed mode
+void tud_sof_cb(int rhport) {
+    static int mux_step = 0;
+    
+    // Read the results of the PREVIOUS scan
+    for (int i = 0; i < 4; i++) {
+        adc_history[mux_step * 4 + i] = adc_raw[i];
+    }
+    
+    // Trigger the NEXT scan
+    mux_step = (mux_step + 1) % 16;
+    scan_mux_step(mux_step);
 }
 
 void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {}
