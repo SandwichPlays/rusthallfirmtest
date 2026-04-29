@@ -5,6 +5,7 @@ use panic_halt as _;
 use cortex_m_rt::entry;
 use at32f4xx_pac as pac;
 use usb_device::prelude::*;
+use usb_device::bus::UsbBusAllocator; // Missing import
 use usbd_hid::descriptor::generator_prelude::*;
 use usbd_hid::hid_class::HIDClass;
 
@@ -51,11 +52,10 @@ fn main() -> ! {
     let usb_bus = synopsys_usb_otg::UsbBus::new(usb_peripheral, unsafe { &mut *(0x20004000 as *mut [u32; 1024]) });
     let usb_bus_alloc = UsbBusAllocator::new(usb_bus);
 
-    // usbd-hid 0.8.2 uses u8 for poll_ms. 1ms is the minimum for Interrupt endpoints in FS/HS descriptors.
     let mut hid = HIDClass::new(&usb_bus_alloc, CustomKeyboardReport::desc(), 1);
 
     let mut usb_dev = UsbDeviceBuilder::new(&usb_bus_alloc, UsbVidPid(0x1209, 0x0001))
-        .strings(&[usb_device::device::StringDescriptors::new(usb_device::lang_id::consts::ENGLISH_US)
+        .strings(&[usb_device::LangID::ENGLISH_US.into_descriptors()
             .manufacturer("Antigravity")
             .product("HE-8K Keyboard")
             .serial_number("0001")])
@@ -65,11 +65,11 @@ fn main() -> ! {
 
     let mut keys: [HallKey; NUM_KEYS] = [HallKey::new(); NUM_KEYS];
     let config = KeyConfig {
-        actuation_mm: 1.5,
-        rt_down_mm: 0.1,
-        rt_up_mm: 0.1,
-        deadzone_top: 0.2,
-        deadzone_bottom: 0.2,
+        actuation_mm: 150,    // 1.5mm
+        rt_down_mm: 10,       // 0.1mm
+        rt_up_mm: 10,         // 0.1mm
+        deadzone_top: 20,     // 0.2mm
+        deadzone_bottom: 20,  // 0.2mm
     };
 
     let mut current_cal_key: usize = 0;

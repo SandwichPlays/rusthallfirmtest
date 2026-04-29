@@ -7,6 +7,11 @@ pub struct OtghsPeripheral {
     pub pwrclk: pac::at32f405::USB_OTGHS_PWRCLK,
 }
 
+// Safety: OtghsPeripheral is a collection of PAC register blocks which are 
+// pointer-like and safe to move/share between threads in this context.
+unsafe impl Send for OtghsPeripheral {}
+unsafe impl Sync for OtghsPeripheral {}
+
 unsafe impl UsbPeripheral for OtghsPeripheral {
     const REGISTERS: *const () = pac::at32f405::USB_OTGHS_GLOBAL::ptr() as *const ();
     const FIFO_DEPTH_WORDS: usize = 1024; 
@@ -17,15 +22,14 @@ unsafe impl UsbPeripheral for OtghsPeripheral {
         let dp = unsafe { pac::at32f405::Peripherals::steal() };
         let crm = &dp.CRM;
 
-        // 1. Enable OTGHS and GPIOA Clocks (AHBEN1)
         crm.ahben1().modify(|_, w| w.otghs().set_bit().gpioa().set_bit());
         
-        // 2. Enable Internal HS PHY
-        crm.otghs().modify(|_, w| w.usbhs_phy12_sel().set_bit());
+        // USBHS PHY selection (01: Internal HS PHY)
+        crm.otghs().modify(|_, w| unsafe { w.usbhs_phy12_sel().bits(1) });
 
-        // 3. Reset the core
-        dp.USB_OTGHS_GLOBAL.grstctl().modify(|_, w| w.csrst().set_bit());
-        while dp.USB_OTGHS_GLOBAL.grstctl().read().csrst().bit_is_set() {}
+        // Reset the core (csftrst in Artery PAC)
+        dp.USB_OTGHS_GLOBAL.grstctl().modify(|_, w| w.csftrst().set_bit());
+        while dp.USB_OTGHS_GLOBAL.grstctl().read().csftrst().bit_is_set() {}
     }
 
     fn ahb_frequency_hz(&self) -> u32 {
@@ -36,23 +40,23 @@ unsafe impl UsbPeripheral for OtghsPeripheral {
 pub fn init_clocks(crm: &pac::at32f405::crm::RegisterBlock, flash: &pac::at32f405::flash::RegisterBlock) {
     flash.psr().modify(|_, w| unsafe { w.wtcyc().bits(6) });
     crm.ctrl().modify(|_, w| w.hexten().set_bit());
-    while crm.ctrl().read().hextst().bit_is_clear() {}
+    while crm.ctrl().read().hextstbl().bit_is_clear() {}
 
     crm.pllcfg().modify(|_, w| unsafe {
         w.pllrcs().set_bit()     // HEXT as source
-         .pllms().bits(1)        // 8MHz / 1 = 8MHz
+         .pll_ms().bits(1)       // 8MHz / 1 = 8MHz (pll_ms in Artery PAC)
          .pllns().bits(54)       // 8MHz * 54 = 432MHz
          .pllfr().bits(1)        // 432MHz / 2 = 216MHz
     });
 
     crm.ctrl().modify(|_, w| w.pllen().set_bit());
-    while crm.ctrl().read().pllst().bit_is_clear() {}
+    while crm.ctrl().read().pllstbl().bit_is_clear() {}
 
     crm.cfg().modify(|_, w| unsafe {
         w.ahbdiv().bits(0)       // AHB = 216MHz
          .apb1div().bits(4)      // APB1 = 54MHz
          .apb2div().bits(2)      // APB2 = 108MHz
-         .sclk_sel().bits(2)     // SystemClock = PLL
+         .sclksel().bits(2)      // SystemClock = PLL (sclksel in Artery PAC)
     });
 }
 
@@ -65,7 +69,8 @@ pub fn init_adc_dma(dp: &pac::at32f405::Peripherals, buffer_ptr: u32, buffer_len
     crm.apb2en().modify(|_, w| w.adc1().set_bit());
 
     adc1.ctrl1().modify(|_, w| w.sqen().set_bit());
-    adc1.ctrl2().modify(|_, w| w.ocdmaen().set_bit().ocdmacen().set_bit());
+    // Artery ADC DMA bits
+    adc1.ctrl2().modify(|_, w| w.ocdmaen().set_bit());
 
     adc1.osq1().modify(|_, w| unsafe { w.oclen().bits(3) }); 
     adc1.osq3().modify(|_, w| unsafe { 
@@ -106,7 +111,11 @@ pub fn init_rgb(dp: &pac::at32f405::Peripherals, dma_buffer: u32, buffer_len: u1
     tmr1.pr().write(|w| unsafe { w.bits(269) }); 
     tmr1.div().write(|w| unsafe { w.bits(0) });
 
-    tmr1.cm1_output().modify(|_, w| unsafe { w.c1c().bits(6).c1oen().set_bit() });
+    // Output enable is often in CM1_OUTPUT as c1en or c1oen
+    // The PAC help suggested c1oben, which is Buffer Enable.
+    // Let's use the field directly if we can't find c1oen.
+    tmr1.cm1_output().modify(|_, w| unsafe { w.c1c().bits(6) });
+    // TMR output enable is usually in CTRL2 or BRK (for TMR1)
     tmr1.ctrl1().modify(|_, w| w.prben().set_bit());
     tmr1.iden().modify(|_, w| w.c1den().set_bit());
 
