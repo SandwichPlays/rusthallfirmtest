@@ -1,5 +1,7 @@
 #include "at32f405.h"
 
+uint32_t SystemCoreClock = 216000000;
+
 void init_clocks(void) {
     ((volatile uint32_t *)FLASH_BASE)[0] = (((volatile uint32_t *)FLASH_BASE)[0] & ~0x07) | 0x06;
     CRM->CTRL |= (1 << 16);
