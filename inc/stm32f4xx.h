@@ -10,7 +10,6 @@
 #define OTG_HS_IRQn                 77
 
 #define USB_OTG_HS_MAX_IN_ENDPOINTS 6
-#define DFIFO_DEPTH_HS              512
 
 typedef int IRQn_Type;
 

@@ -32,4 +32,9 @@ SECTIONS
   } > RAM
 
   _estack = ORIGIN(RAM) + LENGTH(RAM);
+
+  /DISCARD/ :
+  {
+    *(.ARM.exidx*)
+  }
 }

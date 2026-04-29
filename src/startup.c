@@ -20,10 +20,21 @@ void Reset_Handler(void) {
     while (1);
 }
 
+volatile uint32_t ms_ticks = 0;
+
+void SysTick_Handler(void) {
+    ms_ticks++;
+}
+
+uint32_t tusb_time_millis_api(void) {
+    return ms_ticks;
+}
+
 // Minimal vector table
 __attribute__((section(".vectors")))
 void (*const vector_table[])(void) = {
     (void (*)(void))&_estack,
     Reset_Handler,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 // Placeholders for SysTick etc.
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    SysTick_Handler // SysTick at index 15
 };

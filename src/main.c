@@ -33,6 +33,12 @@ void set_led(int index, uint8_t r, uint8_t g, uint8_t b) {
 
 int main(void) {
     init_clocks();
+    
+    // Configure SysTick for 1ms interrupts
+    *((volatile uint32_t *)0xE000E014) = 216000 - 1; // Load value for 1ms @ 216MHz
+    *((volatile uint32_t *)0xE000E018) = 0;          // Current value
+    *((volatile uint32_t *)0xE000E010) = 0x07;       // Enable, Interrupt, Core clock
+    
     init_adc_dma(adc_raw, 4);
     init_rgb(rgb_buffer, NUM_KEYS * 24 + 1);
     tusb_init();
