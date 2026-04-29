@@ -1,7 +1,7 @@
 CC = arm-none-eabi-gcc
 OBJCOPY = arm-none-eabi-objcopy
 TINYUSB_ROOT = tinyusb
-CFLAGS = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -O2 -g -Wall -Iinc -I$(TINYUSB_ROOT)/src
+CFLAGS = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -O2 -g -Wall -Iinc -I$(TINYUSB_ROOT)/src -DSTM32F405xx
 LDFLAGS = -Tlinker_script.ld -nostartfiles -Wl,--gc-sections
 
 SRC = src/main.c src/hw.c src/he_logic.c src/startup.c src/usb_descriptors.c src/flash.c
