@@ -18,22 +18,22 @@
 #define DEFAULT_TOP_DZ      20      
 #define DEFAULT_BOTTOM_DZ   20      
 
-// --- RGB SETTINGS ---
+// --- USER RGB MODES ---
 typedef enum {
     RGB_MODE_OFF,
     RGB_MODE_STATIC,
     RGB_MODE_REACTIVE, // Lights up on press
-    RGB_MODE_RAINBOW
 } rgb_mode_t;
 
 #define ACTIVE_RGB_MODE     RGB_MODE_REACTIVE
-#define RGB_BRIGHTNESS      100     // 0-255
-
-// Colors (R, G, B)
+#define RGB_BRIGHTNESS      100     
 #define COLOR_IDLE          0, 0, 50    // Dim Blue
 #define COLOR_ACTIVE        255, 255, 255 // Pure White
-#define COLOR_CALIBRATING   255, 255, 0   // Yellow
-#define COLOR_CAL_DONE      0, 255, 0     // Green
+
+// --- SYSTEM COLORS (Ignore RGB Mode) ---
+#define COLOR_CAL_WAIT      0, 0, 255     // Blue: Waiting for key
+#define COLOR_CALIBRATING   255, 255, 0   // Yellow: Key being pressed
+#define COLOR_CAL_DONE      0, 255, 0     // Green: Key saved
 
 // --- KEY MAP ---
 // Define your layout here. Standard HID scan codes.

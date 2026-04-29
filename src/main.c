@@ -102,7 +102,7 @@ int main(void) {
                 if (i < current_cal_key) set_led(i, COLOR_CAL_DONE);
                 else if (i == current_cal_key) {
                     if (keys[i].discovery_state == DISCOVERY_WAIT_RELEASE) set_led(i, COLOR_CALIBRATING);
-                    else set_led(i, 0, 0, 255);
+                    else set_led(i, COLOR_CAL_WAIT);
                 } else set_led(i, 0, 0, 0);
             }
             update_rgb(NUM_KEYS * 24 + 1);
