@@ -15,7 +15,7 @@ SRC += $(TINYUSB_ROOT)/src/tusb.c \
        $(TINYUSB_ROOT)/src/portable/synopsys/dwc2/dwc2_common.c
 OBJ = $(SRC:.c=.o)
 
-all: firmware.bin
+all: firmware.bin firmware.uf2
 
 firmware.elf: $(OBJ)
 	$(CC) $(CFLAGS) $(OBJ) $(LDFLAGS) -o $@
@@ -23,8 +23,11 @@ firmware.elf: $(OBJ)
 firmware.bin: firmware.elf
 	$(OBJCOPY) -O binary $< $@
 
+firmware.uf2: firmware.bin
+	python3 uf2conv.py $< $@
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) firmware.elf firmware.bin
+	rm -f $(OBJ) firmware.elf firmware.bin firmware.uf2
