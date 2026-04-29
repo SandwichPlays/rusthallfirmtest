@@ -1,5 +1,6 @@
 #include "at32f405.h"
 #include "he_logic.h"
+#include "tusb.h"
 
 // Hardware hooks from hw.c
 void init_clocks(void);
@@ -24,6 +25,8 @@ int main(void) {
     init_clocks();
     init_adc_dma(adc_buffer, NUM_KEYS);
     init_rgb(rgb_buffer, NUM_KEYS * 24 + 1);
+    
+    tusb_init();
 
     for (int i = 0; i < NUM_KEYS; i++) {
         hall_key_init(&keys[i]);
@@ -41,7 +44,7 @@ int main(void) {
     bool cal_complete = false;
 
     while (1) {
-        // Poll USB here if stack is present
+        tud_task();
 
         if (!cal_complete) {
             discovery_state_t state = hall_key_discovery_tick(&keys[current_cal_key], adc_buffer[current_cal_key]);
@@ -64,15 +67,27 @@ int main(void) {
             }
             update_rgb(NUM_KEYS * 24 + 1);
         } else {
-            // Processing mode
-            uint8_t report[16] = {0};
-            for (int i = 0; i < NUM_KEYS; i++) {
-                if (hall_key_tick(&keys[i], adc_buffer[i], &config)) {
-                    uint8_t usb_code = KEY_MAP[i];
-                    // Fill HID report...
+            if (tud_hid_ready()) {
+                uint8_t keycode[6] = {0};
+                uint8_t modifier = 0;
+                int count = 0;
+
+                for (int i = 0; i < NUM_KEYS; i++) {
+                    if (hall_key_tick(&keys[i], adc_buffer[i], &config)) {
+                        uint8_t usb_code = KEY_MAP[i];
+                        if (usb_code >= 0xE0 && usb_code <= 0xE7) {
+                            modifier |= (1 << (usb_code - 0xE0));
+                        } else if (count < 6) {
+                            keycode[count++] = usb_code;
+                        }
+                    }
                 }
+                tud_hid_keyboard_report(0, modifier, keycode);
             }
-            // Send HID report...
         }
     }
 }
+
+// TinyUSB callbacks
+void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {}
+uint16_t tud_hid_get_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen) { return 0; }

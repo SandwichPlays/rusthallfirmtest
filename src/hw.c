@@ -23,8 +23,13 @@ void init_adc_dma(uint16_t *buffer, uint16_t len) {
     ADC1->CTRL1 |= (1 << 8); // SQEN
     ADC1->CTRL2 |= (1 << 8); // OCDMAEN
 
-    ADC1->OSQ1 = (3 << 20); // 4 conversions (testing) - extend for 64 keys later
-    ADC1->OSQ3 = (0 << 0) | (1 << 5) | (2 << 10) | (3 << 15);
+    // OSQ configuration for 64 keys (requires multiple OSQ registers)
+    ADC1->OSQ1 = (63 << 20); // 64 conversions
+    // For brevity, assuming keys are on CH0-CH15 repeated or using multiplexers
+    // In a real board, you'd map these to specific GPIO pins.
+    for (int i = 0; i < 4; i++) {
+        (&ADC1->OSQ3)[i] = 0x00000000; // Map channels here
+    }
 
     DMA1->CH[0].PADDR = (uint32_t)&ADC1->ODATA;
     DMA1->CH[0].MADDR = (uint32_t)buffer;
