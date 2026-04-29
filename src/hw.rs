@@ -1,4 +1,37 @@
 use at32f4xx_pac as pac;
+use synopsys_usb_otg::UsbPeripheral;
+
+pub struct OtghsPeripheral {
+    pub global: pac::USB_OTGHS_GLOBAL,
+    pub device: pac::USB_OTGHS_DEVICE,
+    pub pwrclk: pac::USB_OTGHS_PWRCLK,
+}
+
+unsafe impl UsbPeripheral for OtghsPeripheral {
+    const REGISTERS: *const () = pac::USB_OTGHS_GLOBAL::ptr() as *const ();
+    const FIFO_DEPTH_WORDS: u16 = 1024; // AT32F405 HS FIFO is 4KB (1024 words)
+    const ENDPOINT_COUNT: usize = 6;
+
+    fn enable() {
+        let dp = unsafe { pac::Peripherals::steal() };
+        let crm = &dp.CRM;
+
+        // 1. Enable OTGHS Clocks
+        crm.ahben2().modify(|_, w| w.otghs().set_bit());
+        
+        // 2. Enable Internal HS PHY
+        // On AT32F405, this requires setting specific bits in the CRM_OTGHS register
+        crm.otghs().modify(|_, w| w.usbhs_phy12_sel().set_bit());
+
+        // 3. Reset the core
+        dp.USB_OTGHS_GLOBAL.grstctl().modify(|_, w| w.csrst().set_bit());
+        while dp.USB_OTGHS_GLOBAL.grstctl().read().csrst().bit_is_set() {}
+    }
+
+    fn ahb_frequency_hz(&self) -> u32 {
+        216_000_000 // Core is running at 216MHz
+    }
+}
 
 /// Initialize system clocks to 216MHz using an 8MHz external crystal (HEXT).
 pub fn init_clocks(crm: &pac::at32f405::crm::RegisterBlock, flash: &pac::at32f405::flash::RegisterBlock) {

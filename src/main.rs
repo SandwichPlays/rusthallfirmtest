@@ -81,38 +81,85 @@ fn main() -> ! {
     }
 
     // 4. Initialize USB HS (Target 8kHz)
-    // TODO: Setup USB OTG HS peripheral
+    let usb_peripheral = hw::OtghsPeripheral {
+        global: dp.USB_OTGHS_GLOBAL,
+        device: dp.USB_OTGHS_DEVICE,
+        pwrclk: dp.USB_OTGHS_PWRCLK,
+    };
+
+    static mut USB_BUS: Option<usb_device::bus::UsbBusAllocator<synopsys_usb_otg::UsbBus<hw::OtghsPeripheral>>> = None;
+    unsafe {
+        USB_BUS = Some(synopsys_usb_otg::UsbBus::new(usb_peripheral, &mut [0u32; 1024]));
+    }
+    let usb_bus = unsafe { USB_BUS.as_ref().unwrap() };
+
+    let mut hid = usbd_hid::hid_class::HIDClass::new(usb_bus, &[
+        0x05, 0x01,        // Usage Page (Generic Desktop)
+        0x09, 0x06,        // Usage (Keyboard)
+        0xA1, 0x01,        // Collection (Application)
+        0x05, 0x07,        //   Usage Page (Key Codes)
+        0x19, 0xE0,        //   Usage Minimum (224)
+        0x29, 0xE7,        //   Usage Maximum (231)
+        0x15, 0x00,        //   Logical Minimum (0)
+        0x25, 0x01,        //   Logical Maximum (1)
+        0x75, 0x01,        //   Report Size (1)
+        0x95, 0x08,        //   Report Count (8)
+        0x81, 0x02,        //   Input (Data, Variable, Absolute) ; Modifier byte
+        0x95, 0x01,        //   Report Count (1)
+        0x75, 0x08,        //   Report Size (8)
+        0x81, 0x01,        //   Input (Constant) ; Reserved byte
+        0x05, 0x07,        //   Usage Page (Key Codes)
+        0x19, 0x00,        //   Usage Minimum (0)
+        0x29, 0x7F,        //   Usage Maximum (127)
+        0x15, 0x00,        //   Logical Minimum (0)
+        0x25, 0x01,        //   Logical Maximum (1)
+        0x75, 0x01,        //   Report Size (1)
+        0x95, 0x80,        //   Report Count (128)
+        0x81, 0x02,        //   Input (Data, Variable, Absolute) ; 128-bit bitmap
+        0xC0               // End Collection
+    ], 1); // bInterval = 1 (125us for High Speed)
+
+    let mut usb_dev = usb_device::device::UsbDeviceBuilder::new(usb_bus, usb_device::device::UsbVidPid(0x1209, 0x0001))
+        .manufacturer("Antigravity")
+        .product("HE Keyboard")
+        .serial_number("8KHZ")
+        .device_class(0x03) // HID
+        .build();
 
     loop {
+        if !usb_dev.poll(&mut [&mut hid]) {
+            continue;
+        }
+
         // NKRO Report: 1 byte modifiers, 1 byte reserved, 16 bytes key bitmask (128 bits)
-        let mut report_mask = [0u8; 16]; 
+        let mut report = [0u8; 18]; 
 
         for i in 0..NUM_KEYS {
             let raw_sample = unsafe { *core::ptr::addr_of!(ADC_BUFFER[i]) };
             
-            // Update Hall Effect logic with deadzones and manual calibration data
+            // Update Hall Effect logic
             keys[i].update(raw_sample, &config);
 
-            // NKRO Keymap: Set the bit corresponding to the keycode
             if keys[i].is_pressed {
                 let keycode = match i {
-                    0 => 0x1A, // W
-                    1 => 0x04, // A
-                    2 => 0x16, // S
-                    3 => 0x07, // D
+                    0 => 0x14, // Q
+                    1 => 0x1A, // W
+                    2 => 0x08, // E
+                    3 => 0x15, // R
                     _ => 0,
                 };
                 
                 if keycode != 0 {
-                    let byte_idx = (keycode / 8) as usize;
+                    let byte_idx = 2 + (keycode / 8) as usize;
                     let bit_idx = (keycode % 8) as u8;
-                    if byte_idx < 16 {
-                        report_mask[byte_idx] |= 1 << bit_idx;
+                    if byte_idx < 18 {
+                        report[byte_idx] |= 1 << bit_idx;
                     }
                 }
             }
         }
 
-        // TODO: Send report_mask via USB HID NKRO endpoint
+        // Send report every 125us
+        let _ = hid.push_raw_input(&report);
     }
 }
