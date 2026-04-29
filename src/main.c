@@ -24,6 +24,10 @@ typedef struct TU_ATTR_PACKED {
 
 void set_led(int index, uint8_t r, uint8_t g, uint8_t b) {
     uint16_t *base = &rgb_buffer[index * 24];
+    uint32_t br = RGB_BRIGHTNESS;
+    r = (r * br) / 255;
+    g = (g * br) / 255;
+    b = (b * br) / 255;
     for (int i = 0; i < 8; i++) {
         base[i] = (g & (1 << (7 - i))) ? 18 : 9;
         base[8 + i] = (r & (1 << (7 - i))) ? 18 : 9;
@@ -95,14 +99,25 @@ int main(void) {
             }
 
             for (int i = 0; i < NUM_KEYS; i++) {
-                if (i < current_cal_key) set_led(i, 0, 255, 0);
+                if (i < current_cal_key) set_led(i, COLOR_CAL_DONE);
                 else if (i == current_cal_key) {
-                    if (keys[i].discovery_state == DISCOVERY_WAIT_RELEASE) set_led(i, 255, 255, 0);
+                    if (keys[i].discovery_state == DISCOVERY_WAIT_RELEASE) set_led(i, COLOR_CALIBRATING);
                     else set_led(i, 0, 0, 255);
                 } else set_led(i, 0, 0, 0);
             }
             update_rgb(NUM_KEYS * 24 + 1);
         } else {
+            // In game mode, handle RGB effects
+            #if ACTIVE_RGB_MODE == RGB_MODE_STATIC
+                for (int i = 0; i < NUM_KEYS; i++) set_led(i, COLOR_IDLE);
+            #elif ACTIVE_RGB_MODE == RGB_MODE_REACTIVE
+                for (int i = 0; i < NUM_KEYS; i++) {
+                    if (keys[i].active) set_led(i, COLOR_ACTIVE);
+                    else set_led(i, COLOR_IDLE);
+                }
+            #endif
+            update_rgb(NUM_KEYS * 24 + 1);
+
             // In game mode, the scan is triggered by tud_sof_cb below
             if (tud_hid_ready()) {
                 hid_nkro_report_t report = {0};
